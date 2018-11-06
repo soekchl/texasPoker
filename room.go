@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 
@@ -13,7 +14,7 @@ type Room struct {
 	Play         bool                      // 游戏中
 	BankerIndex  int                       // 庄家下标
 	PlayUserList [MaxPlayCount]*OnlineUser // 游戏中玩家数据
-	CommonPoker  [5]int32                  // 公共牌
+	CommonPoker  []int32                   // 公共牌
 	Status       int32                     // 1-开始 2-发手牌 3-Bet 4-发底牌(3) 5-Bet 6-发底牌(1) 7-Bet 8-发底牌(1) 9-Bet 10-Over
 	AllBetMoney  int64                     // 总下注金额
 	Poker        [53]int32                 // 1~52 扑克牌
@@ -32,6 +33,7 @@ var (
 
 func init() {
 	go CreateNewRoom()
+	rand.Seed(time.Now().UnixNano())
 }
 
 // 房间开始游戏
@@ -72,17 +74,48 @@ func (room *Room) GameLoop() {
 					case 1: // 1-开始
 						room.SetBlind()
 					case 2: // 2-发手牌
+						room.SendUserPoker()
 					case 4: // 发3张底牌
+						room.SendCommonPoker(3)
 					case 6: // 发1张底牌
 						fallthrough
 					case 8: // 发1张底牌
-
+						room.SendCommonPoker(1)
 					case 10: // 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
 					}
 				}
 			}
 		}
 		time.Sleep(time.Second / 10)
+	}
+}
+
+// 每个参与人发2张牌
+func (room *Room) SendCommonPoker(count int) {
+	for i := 0; i < count; i++ {
+		room.CommonPoker = append(room.CommonPoker, room.getOnePoker())
+	}
+}
+
+// 每个参与人发2张牌
+func (room *Room) SendUserPoker() {
+	for i := 0; i < MaxPlayCount; i++ {
+		u := room.PlayUserList[i]
+		if u != nil && u.Played {
+			u.Poker[0] = room.getOnePoker()
+			u.Poker[1] = room.getOnePoker()
+		}
+	}
+}
+
+// 从房间的扑克中获取一张
+func (room *Room) getOnePoker() int32 {
+	for {
+		r := rand.Intn(52) + 1
+		if room.Poker[r] != 0 {
+			room.Poker[r] = 0
+			return int32(r)
+		}
 	}
 }
 
@@ -130,7 +163,7 @@ func (room *Room) SetBlind() {
 func (room *Room) RoomInit() {
 	room.AllBetMoney = 0
 	room.Play = false
-	room.CommonPoker = [5]int32{0, 0, 0, 0, 0}
+	room.CommonPoker = []int32{}
 	room.Status = 10
 	room.BankerIndex = 0 // 庄家下标 带个标记位往下移
 	for i := 0; i < 53; i++ {
