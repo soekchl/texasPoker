@@ -70,7 +70,7 @@ func (room *Room) GameLoop() {
 					case 7: // bet
 						fallthrough
 					case 9: // bet
-						// 轮流下注  轮流限时监听各个用户
+						// TODO 轮流下注  轮流限时监听各个用户
 					case 1: // 1-开始
 						room.SetBlind()
 					case 2: // 2-发手牌
@@ -81,7 +81,7 @@ func (room *Room) GameLoop() {
 						fallthrough
 					case 8: // 发1张底牌
 						room.SendCommonPoker(1)
-					case 10: // 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
+					case 10: // TODO 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
 					}
 				}
 			}
