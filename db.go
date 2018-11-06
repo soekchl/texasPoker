@@ -10,12 +10,13 @@ const (
 
 type User struct {
 	Id    int64
-	Money int64
+	Money int64 // 初始值 1000
 }
 
 type OnlineUser struct {
-	User
-	RoomId     int64
+	Id         int64
+	Money      int64             // 初始值 1000
+	RoomId     int64             // 房间id
 	Poker      [2]int32          // 手牌
 	SeatNumber int32             // 座位号 1-n
 	Played     bool              // true-参与 false-旁观&弃牌

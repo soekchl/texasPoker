@@ -9,8 +9,9 @@ import (
 
 type Room struct {
 	Id           int64
-	Chip         int32                     // 筹码
+	Chip         int64                     // 筹码
 	Play         bool                      // 游戏中
+	BankerIndex  int                       // 庄家下标
 	PlayUserList [MaxPlayCount]*OnlineUser // 游戏中玩家数据
 	CommonPoker  [5]int32                  // 公共牌
 	Status       int32                     // 1-开始 2-发手牌 3-Bet 4-发底牌(3) 5-Bet 6-发底牌(1) 7-Bet 8-发底牌(1) 9-Bet 10-Over
@@ -34,7 +35,7 @@ func init() {
 }
 
 // 房间开始游戏
-func (room *Room) PlayGame() {
+func (room *Room) GameLoop() {
 	Warn("房间监控 id = ", room.Id%ShowRoomId, " 开启")
 	n := 0
 	for {
@@ -46,11 +47,38 @@ func (room *Room) PlayGame() {
 			}
 		} else { // 用户进入
 			n = 0
-			// 1-开始 2-发手牌 3-Bet 4-发底牌(3) 5-Bet 6-发底牌(1) 7-Bet 8-发底牌(1) 9-Bet 10-Over
-			if room.Status == 10 && len(room.PlayUserList) > 1 {
-				for room.Status = 1; room.Status < 10; {
-					// 1-修改用户状态，下注等信息
-					// 2-发底牌
+			canPlayCount := 0
+			// 检查也参与游戏用户状态 --- 金额是否充足
+			for _, v := range room.PlayUserList {
+				if v.Money > 0 {
+					v.Played = true
+					canPlayCount++
+				} else {
+					v.Played = false
+				}
+			}
+
+			if room.Status >= 10 && canPlayCount > 1 {
+				for room.Status = 1; room.Status <= 10; room.Status++ {
+					switch room.Status {
+					case 3: // bet
+						fallthrough
+					case 5: // bet
+						fallthrough
+					case 7: // bet
+						fallthrough
+					case 9: // bet
+						// 轮流下注  轮流限时监听各个用户
+					case 1: // 1-开始
+						room.SetBlind()
+					case 2: // 2-发手牌
+					case 4: // 发3张底牌
+					case 6: // 发1张底牌
+						fallthrough
+					case 8: // 发1张底牌
+
+					case 10: // 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
+					}
 				}
 			}
 		}
@@ -58,13 +86,55 @@ func (room *Room) PlayGame() {
 	}
 }
 
-// 整个房间队列
-func RoomLoop() {
+// 设置庄家，下 大盲注，小盲注
+func (room *Room) SetBlind() {
 	for {
-		select {
-		case newPlay := <-chanPlayGame:
-			go JoinGame(newPlay)
+		room.BankerIndex = (room.BankerIndex + 1) % MaxPlayCount
+		if room.PlayUserList[room.BankerIndex] != nil && room.PlayUserList[room.BankerIndex].Played && room.PlayUserList[room.BankerIndex].Money > 0 {
+			break
 		}
+	}
+	bigBlindIndex := (room.BankerIndex - 1 + MaxPlayCount) % MaxPlayCount
+	for {
+		if room.PlayUserList[bigBlindIndex] != nil && room.PlayUserList[bigBlindIndex].Played && room.PlayUserList[bigBlindIndex].Money > 0 {
+			break
+		}
+		bigBlindIndex = (bigBlindIndex - 1 + MaxPlayCount) % MaxPlayCount
+	}
+	smallBlindIndex := (bigBlindIndex - 1 + MaxPlayCount) % MaxPlayCount
+	for {
+		if room.PlayUserList[smallBlindIndex] != nil && room.PlayUserList[smallBlindIndex].Played && room.PlayUserList[smallBlindIndex].Money > 0 {
+			break
+		}
+		smallBlindIndex = (smallBlindIndex - 1 + MaxPlayCount) % MaxPlayCount
+	}
+
+	if room.PlayUserList[bigBlindIndex].Money > room.Chip {
+		room.PlayUserList[bigBlindIndex].Money -= room.Chip
+		room.PlayUserList[bigBlindIndex].BetMoney += room.Chip
+	} else {
+		room.PlayUserList[bigBlindIndex].BetMoney = room.PlayUserList[bigBlindIndex].Money
+		room.PlayUserList[bigBlindIndex].Money = 0
+	}
+
+	if room.PlayUserList[bigBlindIndex].Money > room.Chip/2 {
+		room.PlayUserList[bigBlindIndex].Money -= room.Chip / 2
+		room.PlayUserList[bigBlindIndex].BetMoney += room.Chip / 2
+	} else {
+		room.PlayUserList[bigBlindIndex].BetMoney = room.PlayUserList[bigBlindIndex].Money
+		room.PlayUserList[bigBlindIndex].Money = 0
+	}
+}
+
+// 房间数据初始化
+func (room *Room) RoomInit() {
+	room.AllBetMoney = 0
+	room.Play = false
+	room.CommonPoker = [5]int32{0, 0, 0, 0, 0}
+	room.Status = 10
+	room.BankerIndex = 0 // 庄家下标 带个标记位往下移
+	for i := 0; i < 53; i++ {
+		room.Poker[i] = int32(i)
 	}
 }
 
@@ -97,24 +167,23 @@ func CreateNewRoom() int64 {
 		Id:   id,
 		Chip: 5,
 	}
-	RoomInit(room)
+	room.RoomInit()
 
 	RoomMapMutex.Lock()
 	defer RoomMapMutex.Unlock()
 	RoomMap[id] = room
 	Notice("新房间 id = ", id%ShowRoomId, " 创建成功！")
-	go room.PlayGame()
+	go room.GameLoop()
 	return id
 }
 
-// 房间数据初始化
-func RoomInit(room *Room) {
-	room.AllBetMoney = 0
-	room.Play = false
-	room.CommonPoker = [5]int32{0, 0, 0, 0, 0}
-	room.Status = 10
-	for i := 0; i < 53; i++ {
-		room.Poker[i] = int32(i)
+// 整个房间队列
+func RoomLoop() {
+	for {
+		select {
+		case newPlay := <-chanPlayGame:
+			go JoinGame(newPlay)
+		}
 	}
 }
 
