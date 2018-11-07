@@ -69,8 +69,8 @@ func (room *Room) GameLoop() {
 						fallthrough
 					case 7: // bet
 						fallthrough
-					case 9: // bet
-						// TODO 轮流下注  轮流限时监听各个用户
+					case 9:
+						room.Bet()
 					case 1: // 1-开始
 						room.SetBlind()
 					case 2: // 2-发手牌
@@ -87,6 +87,62 @@ func (room *Room) GameLoop() {
 			}
 		}
 		time.Sleep(time.Second / 10)
+	}
+}
+
+// 轮流下注  轮流限时监听各个用户
+func (room *Room) Bet() {
+	index := room.BankerIndex
+	nowBet := int64(0)
+	for _, v := range room.PlayUserList {
+		if v.BetNowMoney > nowBet {
+			nowBet = v.BetNowMoney
+		}
+	}
+	for {
+		u := room.PlayUserList[index]
+
+		if u != nil && u.Played {
+			// TODO 发送 当前所有用户下注 信息  nowBet当前下注
+
+			leaveTimes := time.Second * 15 // 剩余等待时间
+			st := time.Now()
+			recving := true
+			for recving {
+
+				select {
+				case buff, ok := <-u.session.ByteRecvChan:
+					if ok {
+						data := u.session.Format(buff)
+						// TODO 处理从用户这边接收的信息
+						Debug(data)
+					}
+				case <-time.After(leaveTimes):
+				}
+				if recving {
+					leaveTimes -= time.Since(st) // 扣除已消耗时间
+				}
+			}
+		}
+
+		// 查找下一个下注人 并且判断是否下注完成
+		over := false
+		for i := 0; i < MaxPlayCount; i++ {
+			index = (index + 1) % MaxPlayCount
+			if room.PlayUserList[index] != nil && room.PlayUserList[index].Played && !room.PlayUserList[index].BetOk {
+				over = true
+				break
+			}
+		}
+		if over { // 本轮下注完成
+			break
+		}
+	}
+
+	// 每一轮下注结束 重置下注相关信息
+	for _, v := range room.PlayUserList {
+		v.BetNowMoney = 0
+		v.BetOk = false
 	}
 }
 
@@ -119,8 +175,24 @@ func (room *Room) getOnePoker() int32 {
 	}
 }
 
+// 参与用户数据初始化
+func (room *Room) userDataInit() {
+	for _, v := range room.PlayUserList {
+		if v != nil {
+			v.BetAllMoney = 0
+			v.BetNowMoney = 0
+			v.Poker = [2]int32{0, 0}
+			v.Played = true
+		}
+	}
+}
+
 // 设置庄家，下 大盲注，小盲注
 func (room *Room) SetBlind() {
+
+	// 参与用户数据初始化
+	room.userDataInit()
+
 	for {
 		room.BankerIndex = (room.BankerIndex + 1) % MaxPlayCount
 		if room.PlayUserList[room.BankerIndex] != nil && room.PlayUserList[room.BankerIndex].Played && room.PlayUserList[room.BankerIndex].Money > 0 {
@@ -144,17 +216,21 @@ func (room *Room) SetBlind() {
 
 	if room.PlayUserList[bigBlindIndex].Money > room.Chip {
 		room.PlayUserList[bigBlindIndex].Money -= room.Chip
-		room.PlayUserList[bigBlindIndex].BetMoney += room.Chip
+		room.PlayUserList[bigBlindIndex].BetAllMoney = room.Chip
+		room.PlayUserList[bigBlindIndex].BetNowMoney = room.Chip
 	} else {
-		room.PlayUserList[bigBlindIndex].BetMoney = room.PlayUserList[bigBlindIndex].Money
+		room.PlayUserList[bigBlindIndex].BetAllMoney = room.PlayUserList[bigBlindIndex].Money
+		room.PlayUserList[bigBlindIndex].BetNowMoney = room.PlayUserList[bigBlindIndex].Money
 		room.PlayUserList[bigBlindIndex].Money = 0
 	}
 
 	if room.PlayUserList[bigBlindIndex].Money > room.Chip/2 {
 		room.PlayUserList[bigBlindIndex].Money -= room.Chip / 2
-		room.PlayUserList[bigBlindIndex].BetMoney += room.Chip / 2
+		room.PlayUserList[bigBlindIndex].BetAllMoney = room.Chip / 2
+		room.PlayUserList[bigBlindIndex].BetNowMoney = room.Chip / 2
 	} else {
-		room.PlayUserList[bigBlindIndex].BetMoney = room.PlayUserList[bigBlindIndex].Money
+		room.PlayUserList[bigBlindIndex].BetAllMoney = room.PlayUserList[bigBlindIndex].Money
+		room.PlayUserList[bigBlindIndex].BetNowMoney = room.PlayUserList[bigBlindIndex].Money
 		room.PlayUserList[bigBlindIndex].Money = 0
 	}
 }
@@ -180,8 +256,9 @@ func JoinGame(user *OnlineUser) {
 			for kk, vv := range v.PlayUserList {
 				if vv == nil {
 					user.RoomId = k
+					user.SeatNumber = int32(kk + 1)
 					v.PlayUserList[kk] = user
-					// TODO 用户进入房间信息 反馈给用户
+					// TODO 用户进入房间信息 反馈给用户 和 其他所有用户
 					return
 				}
 			}

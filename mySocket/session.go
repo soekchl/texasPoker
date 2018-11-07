@@ -118,6 +118,14 @@ func (session *Session) Receive() (*FormatData, error) {
 	}, nil
 }
 
+func (session *Session) Format(buff []byte) *FormatData {
+	return &FormatData{
+		Id:   int32(DecodeUint32(buff[0:])),
+		Seq:  int32(DecodeUint32(buff[4:])),
+		Body: buff[8:],
+	}
+}
+
 func (session *Session) readLoop() {
 	Debug("[readLoop]")
 	defer ErrorShow()
