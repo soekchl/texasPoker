@@ -21,7 +21,7 @@ type Room struct {
 }
 
 const (
-	ShowRoomId   = 10000
+	ShowRoomId   = 10000000
 	TimeOutLimit = 6000
 )
 
@@ -33,6 +33,7 @@ var (
 
 func init() {
 	go CreateNewRoom()
+	go RoomLoop()
 	rand.Seed(time.Now().UnixNano())
 }
 
@@ -41,17 +42,31 @@ func (room *Room) GameLoop() {
 	Warn("房间监控 id = ", room.Id%ShowRoomId, " 开启")
 	n := 0
 	for {
-		if len(room.PlayUserList) < 1 {
+		count := 0
+		for _, v := range room.PlayUserList {
+			if v != nil {
+				count++
+			}
+		}
+		if count < 1 {
 			n++
 			if n >= TimeOutLimit { // 超过一定时间没有用户进入房间 删除房间
 				go DelRoom(room.Id)
 				return
 			}
+			if n%100 == 0 {
+				Info("房间 id = ", room.Id%ShowRoomId, " 人数=", count)
+			}
 		} else { // 用户进入
+			Debug("房间 id = ", room.Id%ShowRoomId, " 人数=", count)
 			n = 0
 			canPlayCount := 0
 			// 检查也参与游戏用户状态 --- 金额是否充足
 			for _, v := range room.PlayUserList {
+				if v == nil {
+					continue
+				}
+
 				if v.Money > 0 {
 					v.Played = true
 					canPlayCount++
@@ -60,7 +75,8 @@ func (room *Room) GameLoop() {
 				}
 			}
 
-			if room.Status >= 10 && canPlayCount > 1 {
+			if canPlayCount > 1 {
+				Notice("房间 id = ", room.Id%ShowRoomId, " 人数=", count, "  开始游戏")
 				for room.Status = 1; room.Status <= 10; room.Status++ {
 					switch room.Status {
 					case 3: // bet
@@ -95,7 +111,7 @@ func (room *Room) Bet() {
 	index := room.BankerIndex
 	nowBet := int64(0)
 	for _, v := range room.PlayUserList {
-		if v.BetNowMoney > nowBet {
+		if v != nil && v.BetNowMoney > nowBet {
 			nowBet = v.BetNowMoney
 		}
 	}
@@ -141,8 +157,10 @@ func (room *Room) Bet() {
 
 	// 每一轮下注结束 重置下注相关信息
 	for _, v := range room.PlayUserList {
-		v.BetNowMoney = 0
-		v.BetOk = false
+		if v != nil {
+			v.BetNowMoney = 0
+			v.BetOk = false
+		}
 	}
 }
 
@@ -249,18 +267,17 @@ func (room *Room) RoomInit() {
 
 // 参与游戏
 func JoinGame(user *OnlineUser) {
+	Debug("JoinGame ", user.id%ShowRoomId)
 	RoomMapMutex.RLock()
 	defer RoomMapMutex.RUnlock()
 	for k, v := range RoomMap {
-		if len(v.PlayUserList) < MaxPlayCount {
-			for kk, vv := range v.PlayUserList {
-				if vv == nil {
-					user.RoomId = k
-					user.SeatNumber = int32(kk + 1)
-					v.PlayUserList[kk] = user
-					// TODO 用户进入房间信息 反馈给用户 和 其他所有用户
-					return
-				}
+		for kk, vv := range v.PlayUserList {
+			if vv == nil {
+				user.RoomId = k
+				user.SeatNumber = int32(kk + 1)
+				v.PlayUserList[kk] = user
+				// TODO 用户进入房间信息 反馈给用户 和 其他所有用户
+				return
 			}
 		}
 	}
@@ -272,6 +289,18 @@ func JoinGame(user *OnlineUser) {
 
 // 创建新的房间
 func CreateNewRoom() int64 {
+	RoomMapMutex.Lock()
+	defer RoomMapMutex.Unlock()
+	for _, v := range RoomMap {
+		for _, vv := range v.PlayUserList {
+			if vv == nil {
+				return 0 // 有空位置就退出
+			}
+		}
+	}
+
+	// 所有房间满 创建新房间
+
 	id := time.Now().UnixNano()
 	room := &Room{
 		Id:   id,
@@ -279,10 +308,8 @@ func CreateNewRoom() int64 {
 	}
 	room.RoomInit()
 
-	RoomMapMutex.Lock()
-	defer RoomMapMutex.Unlock()
 	RoomMap[id] = room
-	Notice("新房间 id = ", id%ShowRoomId, " 创建成功！")
+	Notice("新房间 id = ", id, " 创建成功！")
 	go room.GameLoop()
 	return id
 }
@@ -292,6 +319,7 @@ func RoomLoop() {
 	for {
 		select {
 		case newPlay := <-chanPlayGame:
+			//			Debug(newPlay.id)
 			go JoinGame(newPlay)
 		}
 	}

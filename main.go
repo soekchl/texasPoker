@@ -2,24 +2,29 @@
 package main
 
 import (
+	"math/rand"
+	"sync/atomic"
 	"texasPoker/mySocket"
 	"time"
 
 	. "github.com/soekchl/myUtils"
 )
 
+const (
+	serverPort = ":1234"
+)
+
+var (
+	userId int64 = 1001
+)
+
 func main() {
-	go func() {
-		time.Sleep(time.Second)
-		Client()
-	}()
-
 	Server()
-
+	rand.Seed(time.Now().UnixNano())
 }
 
 func Client() {
-	client, err := mySocket.Dial("tcp", ":1111", 5)
+	client, err := mySocket.Dial("tcp", serverPort, 5)
 	if err != nil {
 		Error(err)
 		return
@@ -52,7 +57,7 @@ func clientLoop(session *mySocket.Session) {
 }
 
 func Server() {
-	server, err := mySocket.Listen("tcp", ":1111", 5, mySocket.HandlerFunc(serverLoop))
+	server, err := mySocket.Listen("tcp", serverPort, 5, mySocket.HandlerFunc(serverLoop))
 	if err != nil {
 		Error(err)
 		return
@@ -64,6 +69,11 @@ func Server() {
 func serverLoop(session *mySocket.Session) {
 	defer session.Close()
 	Notice("服务器 接收连接：", session.RemoteAddr())
+	chanPlayGame <- &OnlineUser{
+		id:      getUserId(),
+		Money:   1000,
+		session: session,
+	}
 	for {
 		data, err := session.Receive()
 		if err != nil {
@@ -73,4 +83,8 @@ func serverLoop(session *mySocket.Session) {
 		Notice(data)
 		session.Send(data)
 	}
+}
+
+func getUserId() int64 {
+	return atomic.AddInt64(&userId, 1)
 }
