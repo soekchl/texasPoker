@@ -14,7 +14,7 @@ type User struct {
 }
 
 type OnlineUser struct {
-	Id          int64
+	id          int64
 	Money       int64             // 初始值 1000
 	RoomId      int64             // 房间id
 	Poker       [2]int32          // 手牌
