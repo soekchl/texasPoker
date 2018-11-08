@@ -19,6 +19,7 @@ type Room struct {
 	PlayUserList [MaxPlayCount]*OnlineUser // 游戏中玩家数据
 	CommonPoker  []int32                   // 公共牌
 	Status       int                       // 1-开始 2-发手牌 3-Bet 4-发底牌(3) 5-Bet 6-发底牌(1) 7-Bet 8-发底牌(1) 9-Bet 10-Over
+	MinBet       int64                     // 当前轮最小下注额度
 	AllBetMoney  int64                     // 总下注金额
 	Poker        [53]int32                 // 1~52 扑克牌
 	LeaveTimes   time.Duration             // 剩余时间
@@ -103,6 +104,7 @@ func (room *Room) GameLoop() {
 						fallthrough
 					case 9:
 						room.Bet()
+						room.MinBet = 0 // 下注好后清空
 					case 1: // 1-开始
 						room.SetBlind()
 						room.SendDataToClient(0, false)
@@ -198,6 +200,7 @@ func (room *Room) SendDataToClient(betSeat int, over bool) {
 		LeaveTime:   int(room.LeaveTimes / time.Second),
 		RoomStatus:  room.Status,
 		CommonPoker: room.CommonPoker,
+		MinBet:      room.MinBet,
 	}
 	for _, v := range room.PlayUserList {
 		if v != nil {
@@ -280,6 +283,7 @@ func (room *Room) SetBlind() {
 
 	// 参与用户数据初始化
 	room.userDataInit()
+	room.MinBet = room.Chip
 
 	for {
 		room.BankerIndex = (room.BankerIndex + 1) % MaxPlayCount

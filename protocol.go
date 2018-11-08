@@ -28,6 +28,7 @@ type RoomInfo struct {
 	LeaveTime    int        // 剩余等待时间 秒
 	RoomStatus   int        // 房间状态
 	CommonPoker  []int32    // 公共牌
+	MinBet       int64      // 本轮最小下注额度
 	PlayUserList []UserInfo // 游戏中玩家数据
 }
 
