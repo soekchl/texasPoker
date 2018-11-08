@@ -55,6 +55,8 @@ func robotLoop(session *mySocket.Session, key int) {
 		session.Close()
 	}()
 
+	// TODO 接收服务器信息 处理信息
+
 	time.Sleep(time.Second * 15)
 }
 

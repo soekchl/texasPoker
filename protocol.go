@@ -24,7 +24,19 @@ type ClientCmd struct {
 //	server->client
 //		2001	房间信息反馈(整体数据，所有人筹码，下注金额，当前下注人，等待时间 等等)
 type RoomInfo struct {
-	Played       bool         // 游戏中
-	LeaveTime    int32        // 剩余等待时间 秒 四舍五入
-	PlayUserList []OnlineUser // 游戏中玩家数据 只发送参与中的人的数据
+	BetSeat      int        // 下注中用户座位号
+	LeaveTime    int        // 剩余等待时间 秒
+	RoomStatus   int        // 房间状态
+	CommonPoker  []int32    // 公共牌
+	PlayUserList []UserInfo // 游戏中玩家数据
+}
+
+type UserInfo struct {
+	Money       int64   // 剩余金额
+	Poker       []int32 // 手牌
+	SeatNumber  int32   // 座位号 1-n
+	Played      bool    // true-参与 false-旁观&弃牌
+	BetAllMoney int64   // 下注总金额
+	BetNowMoney int64   // 当轮下注金额
+	BetOk       bool    // 本轮下注完成
 }

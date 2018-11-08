@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"sync"
+	"texasPoker/mySocket"
 	"time"
 
 	. "github.com/soekchl/myUtils"
@@ -15,9 +18,10 @@ type Room struct {
 	BankerIndex  int                       // 庄家下标
 	PlayUserList [MaxPlayCount]*OnlineUser // 游戏中玩家数据
 	CommonPoker  []int32                   // 公共牌
-	Status       int32                     // 1-开始 2-发手牌 3-Bet 4-发底牌(3) 5-Bet 6-发底牌(1) 7-Bet 8-发底牌(1) 9-Bet 10-Over
+	Status       int                       // 1-开始 2-发手牌 3-Bet 4-发底牌(3) 5-Bet 6-发底牌(1) 7-Bet 8-发底牌(1) 9-Bet 10-Over
 	AllBetMoney  int64                     // 总下注金额
 	Poker        [53]int32                 // 1~52 扑克牌
+	LeaveTimes   time.Duration             // 剩余时间
 }
 
 const (
@@ -29,12 +33,24 @@ var (
 	chanPlayGame = make(chan *OnlineUser, 32) // 参与游戏数据
 	RoomMap      = make(map[int64]*Room)      // 房间列表
 	RoomMapMutex sync.RWMutex                 // 房间锁
+	statusToName = make(map[int]string, 12)   // 房间状态
 )
 
 func init() {
 	go CreateNewRoom()
 	go RoomLoop()
 	rand.Seed(time.Now().UnixNano())
+
+	statusToName[1] = "开始游戏"
+	statusToName[2] = "发手牌"
+	statusToName[3] = "下注"
+	statusToName[4] = "发3张底牌"
+	statusToName[5] = "下注"
+	statusToName[6] = "发一张底牌"
+	statusToName[7] = "下注"
+	statusToName[8] = "发一张底牌"
+	statusToName[9] = "下注"
+	statusToName[10] = "游戏结算"
 }
 
 // 房间开始游戏
@@ -76,8 +92,8 @@ func (room *Room) GameLoop() {
 			}
 
 			if canPlayCount > 1 {
-				Notice("房间 id = ", room.Id%ShowRoomId, " 人数=", count, "  开始游戏")
 				for room.Status = 1; room.Status <= 10; room.Status++ {
+					Notice("房间 id = ", room.Id%ShowRoomId, " ", room.Status, "-", statusToName[room.Status])
 					switch room.Status {
 					case 3: // bet
 						fallthrough
@@ -89,8 +105,10 @@ func (room *Room) GameLoop() {
 						room.Bet()
 					case 1: // 1-开始
 						room.SetBlind()
+						room.SendDataToClient(0, false)
 					case 2: // 2-发手牌
 						room.SendUserPoker()
+						room.SendDataToClient(0, false)
 					case 4: // 发3张底牌
 						room.SendCommonPoker(3)
 					case 6: // 发1张底牌
@@ -98,6 +116,13 @@ func (room *Room) GameLoop() {
 					case 8: // 发1张底牌
 						room.SendCommonPoker(1)
 					case 10: // TODO 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
+					}
+
+					Debug(fmt.Sprintf("%#v", room))
+					for _, v := range room.PlayUserList {
+						if v != nil {
+							Debug(fmt.Sprintf("%#v", v))
+						}
 					}
 				}
 			}
@@ -116,16 +141,16 @@ func (room *Room) Bet() {
 		}
 	}
 	for {
+		Debug("房间 id = ", room.Id%ShowRoomId, " 用户 = ", index+1, " 下注")
 		u := room.PlayUserList[index]
 
 		if u != nil && u.Played {
+			room.LeaveTimes = time.Second * 15 // 剩余等待时间
 			// TODO 发送 当前所有用户下注 信息  nowBet当前下注
-
-			leaveTimes := time.Second * 15 // 剩余等待时间
+			room.SendDataToClient(index+1, false)
 			st := time.Now()
 			recving := true
 			for recving {
-
 				select {
 				case buff, ok := <-u.session.ByteRecvChan:
 					if ok {
@@ -133,12 +158,13 @@ func (room *Room) Bet() {
 						// TODO 处理从用户这边接收的信息
 						Debug(data)
 					}
-				case <-time.After(leaveTimes):
+				case <-time.After(room.LeaveTimes):
 				}
 				if recving {
-					leaveTimes -= time.Since(st) // 扣除已消耗时间
+					room.LeaveTimes -= time.Since(st) // 扣除已消耗时间
 				}
 			}
+			room.LeaveTimes = 0
 		}
 
 		// 查找下一个下注人 并且判断是否下注完成
@@ -160,6 +186,50 @@ func (room *Room) Bet() {
 		if v != nil {
 			v.BetNowMoney = 0
 			v.BetOk = false
+		}
+	}
+}
+
+// 发送信息给客户端 index-当前下注下标
+func (room *Room) SendDataToClient(betSeat int, over bool) {
+	// TODO 发送 当前所有用户下注 信息  nowBet当前下注
+	ri := &RoomInfo{
+		BetSeat:     betSeat,
+		LeaveTime:   int(room.LeaveTimes / time.Second),
+		RoomStatus:  room.Status,
+		CommonPoker: room.CommonPoker,
+	}
+	for _, v := range room.PlayUserList {
+		if v != nil {
+			ui := UserInfo{
+				Money:       v.Money,
+				SeatNumber:  v.SeatNumber,
+				Played:      v.Played,
+				BetAllMoney: v.BetAllMoney,
+				BetNowMoney: v.BetNowMoney,
+				BetOk:       v.BetOk,
+			}
+			if over && v.Played {
+				ui.Poker = []int32{v.Poker[0], v.Poker[0]}
+			}
+			ri.PlayUserList = append(ri.PlayUserList, ui)
+		}
+	}
+
+	Debug(fmt.Sprintf("%#v", ri))
+
+	buff, err := json.Marshal(ri)
+	if err != nil {
+		Error(err)
+		return
+	}
+
+	for _, v := range room.PlayUserList {
+		if v != nil {
+			err = v.session.Send(&mySocket.FormatData{Id: 2001, Body: buff})
+			if err != nil {
+				Error(err)
+			}
 		}
 	}
 }
@@ -232,6 +302,8 @@ func (room *Room) SetBlind() {
 		smallBlindIndex = (smallBlindIndex - 1 + MaxPlayCount) % MaxPlayCount
 	}
 
+	Debug("房间 id = ", room.Id%ShowRoomId, " 大盲注 = ", bigBlindIndex, " 小盲注 = ", smallBlindIndex)
+
 	if room.PlayUserList[bigBlindIndex].Money > room.Chip {
 		room.PlayUserList[bigBlindIndex].Money -= room.Chip
 		room.PlayUserList[bigBlindIndex].BetAllMoney = room.Chip
@@ -242,15 +314,17 @@ func (room *Room) SetBlind() {
 		room.PlayUserList[bigBlindIndex].Money = 0
 	}
 
-	if room.PlayUserList[bigBlindIndex].Money > room.Chip/2 {
-		room.PlayUserList[bigBlindIndex].Money -= room.Chip / 2
-		room.PlayUserList[bigBlindIndex].BetAllMoney = room.Chip / 2
-		room.PlayUserList[bigBlindIndex].BetNowMoney = room.Chip / 2
+	if room.PlayUserList[smallBlindIndex].Money > room.Chip/2 {
+		room.PlayUserList[smallBlindIndex].Money -= room.Chip / 2
+		room.PlayUserList[smallBlindIndex].BetAllMoney = room.Chip / 2
+		room.PlayUserList[smallBlindIndex].BetNowMoney = room.Chip / 2
 	} else {
-		room.PlayUserList[bigBlindIndex].BetAllMoney = room.PlayUserList[bigBlindIndex].Money
-		room.PlayUserList[bigBlindIndex].BetNowMoney = room.PlayUserList[bigBlindIndex].Money
-		room.PlayUserList[bigBlindIndex].Money = 0
+		room.PlayUserList[smallBlindIndex].BetAllMoney = room.PlayUserList[smallBlindIndex].Money
+		room.PlayUserList[smallBlindIndex].BetNowMoney = room.PlayUserList[smallBlindIndex].Money
+		room.PlayUserList[smallBlindIndex].Money = 0
 	}
+
+	room.Play = true
 }
 
 // 房间数据初始化
@@ -304,7 +378,7 @@ func CreateNewRoom() int64 {
 	id := time.Now().UnixNano()
 	room := &Room{
 		Id:   id,
-		Chip: 5,
+		Chip: 10,
 	}
 	room.RoomInit()
 
