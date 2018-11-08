@@ -103,7 +103,6 @@ func (room *Room) GameLoop() {
 					case 7: // bet
 						fallthrough
 					case 9:
-						// TODO 当所有人都allin就不进去循环
 						room.Bet()
 						room.MinBet = 0 // 下注好后清空
 					case 1: // 1-开始
