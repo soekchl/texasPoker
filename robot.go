@@ -89,12 +89,41 @@ func robotLoop(session *mySocket.Session, key int) {
 			case 7: // bet
 				fallthrough
 			case 9:
-				Debug(fmt.Sprintf("本轮我下注 座位号=%v 已下注=%v 总金额=%v 我的牌=%v 公共牌=%v",
-					mySeat,
-					myInfo.BetNowMoney,
-					myInfo.BetAllMoney,
-					showPokerNumber(myInfo.Poker),
-					ri.CommonPoker))
+				cc := &ClientCmd{}
+				if ri.MinBet > myInfo.BetNowMoney {
+					cc.Bet = ri.MinBet - myInfo.BetNowMoney
+					Debug(fmt.Sprintf("本轮我下注 座位号=%v 已下注=%v 当前下注=%v 总金额=%v 我的牌=%v 公共牌=%v",
+						mySeat,
+						myInfo.BetNowMoney,
+						cc.Bet,
+						myInfo.BetAllMoney,
+						showPokerNumber(myInfo.Poker),
+						showPokerNumber(ri.CommonPoker)),
+					)
+				} else {
+					cc.AllIn = true
+					Debug(fmt.Sprintf("本轮我下注 座位号=%v 已下注=%v 总金额=%v 我的牌=%v 公共牌=%v AllIn",
+						mySeat,
+						myInfo.BetNowMoney,
+						myInfo.BetAllMoney,
+						showPokerNumber(myInfo.Poker),
+						showPokerNumber(ri.CommonPoker)),
+					)
+				}
+				buff, err := json.Marshal(cc)
+				if err != nil {
+					Error(err)
+					return
+				}
+				data := &mySocket.FormatData{
+					Id:   1001,
+					Body: buff,
+				}
+				err = session.Send(data)
+				if err != nil {
+					Error(err)
+					return
+				}
 			}
 		}
 	}

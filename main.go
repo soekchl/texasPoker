@@ -67,21 +67,11 @@ func Server() {
 }
 
 func serverLoop(session *mySocket.Session) {
-	defer session.Close()
 	Notice("服务器 接收连接：", session.RemoteAddr())
 	chanPlayGame <- &OnlineUser{
 		id:      getUserId(),
 		Money:   1000,
 		session: session,
-	}
-	for {
-		data, err := session.Receive()
-		if err != nil {
-			Error(err)
-			return
-		}
-		Notice(data)
-		session.Send(data)
 	}
 }
 

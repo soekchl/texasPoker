@@ -23,5 +23,6 @@ type OnlineUser struct {
 	BetAllMoney int64             // 下注总金额
 	BetNowMoney int64             // 当轮下注金额
 	BetOk       bool              // 本轮下注完成
+	AllIn       bool              // allin标记
 	session     *mySocket.Session // 连接socket
 }

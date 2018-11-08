@@ -126,6 +126,8 @@ func (room *Room) GameLoop() {
 							Debug(fmt.Sprintf("%#v", v))
 						}
 					}
+					Notice("=========================================================")
+					time.Sleep(time.Second)
 				}
 			}
 		}
@@ -145,40 +147,54 @@ func (room *Room) Bet() {
 	for {
 		Debug("房间 id = ", room.Id%ShowRoomId, " 用户座位=", index+1, " 下注")
 		u := room.PlayUserList[index]
+		Debug("index = ", index)
 
 		if u != nil && u.Played {
 			room.LeaveTimes = time.Second * 15 // 剩余等待时间
-			// TODO 发送 当前所有用户下注 信息  nowBet当前下注
+			// 发送 当前所有用户下注 信息  nowBet当前下注
 			room.SendDataToClient(index+1, false)
 			st := time.Now()
 			recving := true
-			for recving {
+			for recving && room.LeaveTimes >= 0 {
 				select {
 				case buff, ok := <-u.session.ByteRecvChan:
 					if ok {
 						data := u.session.Format(buff)
-						// TODO 处理从用户这边接收的信息
-						Debug(data)
+						// 处理从用户这边接收的信息
+						cc := &ClientCmd{}
+						err := json.Unmarshal(data.Body, cc)
+						if err != nil {
+							Error(err)
+							recving = false
+							break
+						}
+						recving = room.ClientCmdProcess(u, cc)
+						Debug("下注结果=", recving, u, cc)
 					}
 				case <-time.After(room.LeaveTimes):
+					recving = false
 				}
 				if recving {
 					room.LeaveTimes -= time.Since(st) // 扣除已消耗时间
 				}
 			}
 			room.LeaveTimes = 0
+
+			// TODO 超过时间 未下注 如果不满足最低下注 就是弃牌
 		}
 
 		// 查找下一个下注人 并且判断是否下注完成
-		over := false
+		breakFlag := false
 		for i := 0; i < MaxPlayCount; i++ {
 			index = (index + 1) % MaxPlayCount
-			if room.PlayUserList[index] != nil && room.PlayUserList[index].Played && !room.PlayUserList[index].BetOk {
-				over = true
-				break
+			if room.PlayUserList[index] != nil && room.PlayUserList[index].Played {
+				if !room.PlayUserList[index].BetOk {
+					breakFlag = true
+					break
+				}
 			}
 		}
-		if over { // 本轮下注完成
+		if !breakFlag { // 本轮下注完成
 			break
 		}
 	}
@@ -190,6 +206,42 @@ func (room *Room) Bet() {
 			v.BetOk = false
 		}
 	}
+}
+
+// 用户 命令解析  反馈是否继续等待命令 true-继续等待 false-过
+func (room *Room) ClientCmdProcess(userInfo *OnlineUser, data *ClientCmd) (err bool) {
+	Debug(fmt.Sprintf("%#v", data))
+	if data.AllIn {
+		userInfo.BetNowMoney += userInfo.Money
+		room.AllBetMoney += userInfo.Money
+		userInfo.AllIn = true
+		userInfo.BetOk = true
+		userInfo.Money = 0
+		if userInfo.BetNowMoney > room.MinBet {
+			room.MinBet = userInfo.BetNowMoney
+		}
+	} else if data.GiveUp {
+		userInfo.BetOk = true
+		userInfo.Played = false
+	} else if data.Bet > 0 {
+		// TODO have bug
+		if userInfo.BetAllMoney < data.Bet || userInfo.BetNowMoney+data.Bet < room.MinBet {
+			return true
+		}
+		userInfo.BetNowMoney += data.Bet
+		room.AllBetMoney += data.Bet
+		userInfo.AllIn = true
+		userInfo.BetOk = true
+
+		if userInfo.BetNowMoney > room.MinBet {
+			room.MinBet = userInfo.BetNowMoney
+		}
+	} else if data.Check || data.Bet == 0 {
+		if userInfo.BetNowMoney < room.MinBet {
+			return true
+		}
+	}
+	return false
 }
 
 // 发送信息给客户端 index-当前下注下标
