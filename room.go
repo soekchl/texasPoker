@@ -94,7 +94,7 @@ func (room *Room) GameLoop() {
 
 			if canPlayCount > 1 {
 				for room.Status = 1; room.Status <= 10; room.Status++ {
-					Notice("房间 id = ", room.Id%ShowRoomId, " ", room.Status, "-", statusToName[room.Status])
+					Notice("房间 id = ", room.Id%ShowRoomId, " 状态 = ", room.Status, " ", statusToName[room.Status])
 					switch room.Status {
 					case 3: // bet
 						fallthrough
@@ -143,7 +143,7 @@ func (room *Room) Bet() {
 		}
 	}
 	for {
-		Debug("房间 id = ", room.Id%ShowRoomId, " 用户 = ", index+1, " 下注")
+		Debug("房间 id = ", room.Id%ShowRoomId, " 用户座位=", index+1, " 下注")
 		u := room.PlayUserList[index]
 
 		if u != nil && u.Played {
@@ -194,7 +194,7 @@ func (room *Room) Bet() {
 
 // 发送信息给客户端 index-当前下注下标
 func (room *Room) SendDataToClient(betSeat int, over bool) {
-	// TODO 发送 当前所有用户下注 信息  nowBet当前下注
+	// 发送 当前所有用户下注 信息  nowBet当前下注
 	ri := &RoomInfo{
 		BetSeat:     betSeat,
 		LeaveTime:   int(room.LeaveTimes / time.Second),
@@ -202,37 +202,39 @@ func (room *Room) SendDataToClient(betSeat int, over bool) {
 		CommonPoker: room.CommonPoker,
 		MinBet:      room.MinBet,
 	}
-	for _, v := range room.PlayUserList {
-		if v != nil {
-			ui := UserInfo{
-				Money:       v.Money,
-				SeatNumber:  v.SeatNumber,
-				Played:      v.Played,
-				BetAllMoney: v.BetAllMoney,
-				BetNowMoney: v.BetNowMoney,
-				BetOk:       v.BetOk,
+
+	for k, v := range room.PlayUserList {
+		if v == nil {
+			continue
+		}
+		ri.PlayUserList = []UserInfo{}
+		for _, vv := range room.PlayUserList {
+			if vv == nil {
+				continue
 			}
-			if over && v.Played {
-				ui.Poker = []int32{v.Poker[0], v.Poker[0]}
+			ui := UserInfo{
+				Money:       vv.Money,
+				SeatNumber:  vv.SeatNumber,
+				Played:      vv.Played,
+				BetAllMoney: vv.BetAllMoney,
+				BetNowMoney: vv.BetNowMoney,
+				BetOk:       vv.BetOk,
+			}
+			if vv.id == v.id { // 当自己的时候发送
+				ui.Poker = []int32{vv.Poker[0], vv.Poker[1]}
 			}
 			ri.PlayUserList = append(ri.PlayUserList, ui)
 		}
-	}
 
-	Debug(fmt.Sprintf("%#v", ri))
+		buff, err := json.Marshal(ri)
+		if err != nil {
+			Error(err)
+			return
+		}
 
-	buff, err := json.Marshal(ri)
-	if err != nil {
-		Error(err)
-		return
-	}
-
-	for _, v := range room.PlayUserList {
-		if v != nil {
-			err = v.session.Send(&mySocket.FormatData{Id: 2001, Body: buff})
-			if err != nil {
-				Error(err)
-			}
+		err = v.session.Send(&mySocket.FormatData{Id: 2001, Body: buff, Seq: int32(k + 1)})
+		if err != nil {
+			Error(err)
 		}
 	}
 }

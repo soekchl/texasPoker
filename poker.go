@@ -333,3 +333,10 @@ func sortPoker(poker []int32) {
 		}
 	}
 }
+
+func showPokerNumber(poker []int32) (newPoker []int32) {
+	for _, v := range poker {
+		newPoker = append(newPoker, (v-1)%PokerLimit+1)
+	}
+	return
+}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"sync"
 	"texasPoker/mySocket"
@@ -55,9 +57,47 @@ func robotLoop(session *mySocket.Session, key int) {
 		session.Close()
 	}()
 
-	// TODO 接收服务器信息 处理信息
+	var mySeat int32 = 0 // 自己的位置
+	var myInfo *UserInfo
 
-	time.Sleep(time.Second * 15)
+	// 接收服务器信息 处理信息
+	for {
+		data, err := session.Receive()
+		if err != nil {
+			Error(err)
+			return
+		}
+		ri := &RoomInfo{}
+		err = json.Unmarshal(data.Body, ri)
+		if err != nil {
+			Error(err)
+			return
+		}
+		mySeat = data.Seq
+		Debug("Client Recv: ", ri.RoomStatus, " ", fmt.Sprintf("%#v", ri))
+		for k, v := range ri.PlayUserList {
+			if v.SeatNumber == mySeat {
+				myInfo = &ri.PlayUserList[k]
+			}
+		}
+		if ri.BetSeat == int(mySeat) && myInfo != nil && myInfo.Played {
+			switch ri.RoomStatus {
+			case 3: // bet
+				fallthrough
+			case 5: // bet
+				fallthrough
+			case 7: // bet
+				fallthrough
+			case 9:
+				Debug(fmt.Sprintf("本轮我下注 座位号=%v 已下注=%v 总金额=%v 我的牌=%v 公共牌=%v",
+					mySeat,
+					myInfo.BetNowMoney,
+					myInfo.BetAllMoney,
+					showPokerNumber(myInfo.Poker),
+					ri.CommonPoker))
+			}
+		}
+	}
 }
 
 // 增加robot
