@@ -103,6 +103,7 @@ func (room *Room) GameLoop() {
 					case 7: // bet
 						fallthrough
 					case 9:
+						// TODO 当所有人都allin就不进去循环
 						room.Bet()
 						room.MinBet = 0 // 下注好后清空
 					case 1: // 1-开始
@@ -118,6 +119,8 @@ func (room *Room) GameLoop() {
 					case 8: // 发1张底牌
 						room.SendCommonPoker(1)
 					case 10: // TODO 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
+						Notice("------------------------------------------------------------------------------------------------")
+						time.Sleep(time.Second * 3)
 					}
 
 					Debug(fmt.Sprintf("%#v", room))
@@ -137,6 +140,19 @@ func (room *Room) GameLoop() {
 
 // 轮流下注  轮流限时监听各个用户
 func (room *Room) Bet() {
+	allinFlag := true
+	for _, v := range room.PlayUserList {
+		if v != nil && v.Played {
+			if !v.AllIn {
+				allinFlag = false
+			}
+		}
+	}
+	if allinFlag { // 所有人allin
+		Debug("房间 id = ", room.Id%ShowRoomId, " 所有人All In")
+		return
+	}
+
 	index := room.BankerIndex
 	nowBet := int64(0)
 	for _, v := range room.PlayUserList {
@@ -179,8 +195,11 @@ func (room *Room) Bet() {
 				}
 			}
 			room.LeaveTimes = 0
-
 			// TODO 超过时间 未下注 如果不满足最低下注 就是弃牌
+			if room.MinBet > u.BetNowMoney {
+				u.Played = false
+			}
+			u.BetOk = true
 		}
 
 		// 查找下一个下注人 并且判断是否下注完成
@@ -224,12 +243,12 @@ func (room *Room) ClientCmdProcess(userInfo *OnlineUser, data *ClientCmd) (err b
 		userInfo.BetOk = true
 		userInfo.Played = false
 	} else if data.Bet > 0 {
-		// TODO have bug
-		if userInfo.BetAllMoney < data.Bet || userInfo.BetNowMoney+data.Bet < room.MinBet {
+		if userInfo.Money < data.Bet && userInfo.BetNowMoney+data.Bet < room.MinBet {
 			return true
 		}
 		userInfo.BetNowMoney += data.Bet
 		room.AllBetMoney += data.Bet
+		userInfo.Money -= data.Bet
 		userInfo.AllIn = true
 		userInfo.BetOk = true
 

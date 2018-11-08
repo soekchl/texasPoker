@@ -90,7 +90,7 @@ func robotLoop(session *mySocket.Session, key int) {
 				fallthrough
 			case 9:
 				cc := &ClientCmd{}
-				if ri.MinBet > myInfo.BetNowMoney {
+				if ri.MinBet >= myInfo.BetNowMoney {
 					cc.Bet = ri.MinBet - myInfo.BetNowMoney
 					Debug(fmt.Sprintf("本轮我下注 座位号=%v 已下注=%v 当前下注=%v 总金额=%v 我的牌=%v 公共牌=%v",
 						mySeat,
