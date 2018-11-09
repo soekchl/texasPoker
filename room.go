@@ -117,7 +117,8 @@ func (room *Room) GameLoop() {
 						fallthrough
 					case 8: // 发1张底牌
 						room.SendCommonPoker(1)
-					case 10: // TODO 游戏结束 比拼胜负 奖池划分   公布结果 等待1秒
+					case 10: // 游戏结束 比拼胜负 奖池划分
+						room.Settlement()
 						Notice("------------------------------------------------------------------------------------------------")
 						time.Sleep(time.Second * 3)
 					}
@@ -135,6 +136,76 @@ func (room *Room) GameLoop() {
 		}
 		time.Sleep(time.Second / 10)
 	}
+}
+
+// 游戏结束 比拼胜负 结算
+func (room *Room) Settlement() {
+	/*
+		下注最高到最小 排序
+
+		最高的中找到最大的比较 胜利者 赢取 排序中次大者 差值 x 人数
+
+		依次类推
+	*/
+	var (
+		maxIndexList []int
+		lastMaxIndex []int
+		startIndex         = 0
+		stopIndex          = 0
+		nextBetMoney int64 = 0
+	)
+
+	for k, v := range room.PlayUserList {
+		if v != nil {
+			maxIndexList = append(maxIndexList, k)
+		}
+	}
+
+	// 排序
+	for i := 0; i < len(maxIndexList); i++ {
+		for j := 0; j < len(maxIndexList)-i-1; j++ {
+			if room.PlayUserList[maxIndexList[j]].BetAllMoney < room.PlayUserList[maxIndexList[j]].BetAllMoney {
+				maxIndexList[j], maxIndexList[j+1] = maxIndexList[j+1], maxIndexList[j]
+			}
+		}
+	}
+
+	// TODO 开始结算这边还有点问题  逻辑有点复杂。。。 等下次在写。。。
+	/*
+		startIndex = 0
+		stopIndex = len(maxIndexList) - 1
+		for {
+			nextBetMoney = 0
+			for i := startIndex; i < len(maxIndexList)-1; i++ {
+				if room.PlayUserList[i].BetAllMoney != room.PlayUserList[i+1].BetAllMoney {
+					stopIndex = i
+					nextBetMoney = room.PlayUserList[i+1].BetAllMoney
+					break
+				}
+			}
+			lastMaxIndex = append(lastMaxIndex, startIndex)
+			for i := startIndex; i < stopIndex; i++ {
+				up1 := append(room.CommonPoker, room.PlayUserList[lastMaxIndex[0]].Poker[:]...)
+				up2 := append(room.CommonPoker, room.PlayUserList[i+1].Poker[:]...)
+				r, _ := ComparePoker(up1, up2)
+				switch r {
+				case 0:
+					lastMaxIndex = append(lastMaxIndex, i+1)
+				case -1:
+					lastMaxIndex = []int{i + 1}
+				}
+			}
+			// lastMaxIndex 从中 最大的牌 下标们
+			// 结算
+			money := int(room.PlayUserList[lastMaxIndex[0]].BetAllMoney-nextBetMoney) * (stopIndex - startIndex + 1) / len(lastMaxIndex)
+			for _, v := range lastMaxIndex {
+				room.PlayUserList[v].WinMoney = int64(money)
+			}
+			if nextBetMoney == 0 {
+				break
+			}
+		}
+	*/
 }
 
 // 轮流下注  轮流限时监听各个用户
@@ -194,7 +265,7 @@ func (room *Room) Bet() {
 				}
 			}
 			room.LeaveTimes = 0
-			// TODO 超过时间 未下注 如果不满足最低下注 就是弃牌
+			// 超过时间 未下注 如果不满足最低下注 就是弃牌
 			if room.MinBet > u.BetNowMoney {
 				u.Played = false
 			}
@@ -344,6 +415,7 @@ func (room *Room) userDataInit() {
 		if v != nil {
 			v.BetAllMoney = 0
 			v.BetNowMoney = 0
+			v.WinMoney = 0
 			v.Poker = [2]int32{0, 0}
 			v.Played = true
 		}
@@ -426,7 +498,8 @@ func JoinGame(user *OnlineUser) {
 				user.RoomId = k
 				user.SeatNumber = int32(kk + 1)
 				v.PlayUserList[kk] = user
-				// TODO 用户进入房间信息 反馈给用户 和 其他所有用户
+				// 用户进入房间信息 反馈给用户 和 其他所有用户
+				v.SendDataToClient(0, false)
 				return
 			}
 		}
